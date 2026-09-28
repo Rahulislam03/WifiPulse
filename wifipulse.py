@@ -5,6 +5,7 @@ import subprocess
 import platform
 import time
 import urllib.request
+import json
 from datetime import datetime
 
 # ১. টার্মিনাল কালার কোড
@@ -36,7 +37,6 @@ MAC_VENDORS = {
     "FC:EC:DA": "Ubiquiti / Unifi"
 }
 
-# ডিফল্ট পাসওয়ার্ড চেকিংয়ের কমন লিস্ট
 COMMON_CREDENTIALS = [
     ("admin", "admin"),
     ("admin", "1234"),
@@ -49,6 +49,25 @@ def print_banner():
     print(CYAN + "=" * 65 + RESET)
     print(GREEN + "        📶 WIFI PULSE - ADVANCED NETWORK & SPEED INSPECTOR       " + RESET)
     print(CYAN + "=" * 65 + RESET)
+
+# FEATURE 1: Public IP & ISP Details Fetcher
+def get_public_ip_info():
+    try:
+        url = "http://ip-api.com/json/"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if data.get('status') == 'success':
+                return {
+                    "ip": data.get("query", "Unknown"),
+                    "isp": data.get("isp", "Unknown ISP"),
+                    "org": data.get("org", "Unknown Org"),
+                    "country": data.get("country", "Unknown"),
+                    "city": data.get("city", "Unknown")
+                }
+    except Exception:
+        pass
+    return None
 
 def get_auto_network_info():
     try:
@@ -79,9 +98,8 @@ def ping_host(ip):
     except Exception:
         return False
 
-# FEATURE 5: Real Download Speedtest Function
 def test_download_speed():
-    print(YELLOW + "[*] Testing Internet Download Speed (Downloading 5MB test payload)..." + RESET)
+    print(YELLOW + "[*] Testing Internet Download Speed (Downloading test payload)..." + RESET)
     test_url = "http://speedtest.tele2.net/1MB.zip"
     try:
         start_time = time.time()
@@ -167,7 +185,6 @@ def scan_device_ports_and_banners(target_ip):
             pass
     return open_ports
 
-# FEATURE 4: Router Weak Credentials Scanner
 def check_router_weak_credentials(gateway_ip):
     weak_found = []
     for user, pwd in COMMON_CREDENTIALS:
@@ -197,7 +214,6 @@ def check_router_security(gateway_ip, open_ports):
     if 1900 in open_port_numbers:
         warnings.append("UPnP (Port 1900) is active. Potential vulnerability entry point.")
         
-    # Weak Password Audit
     weak_creds = check_router_weak_credentials(gateway_ip)
     if weak_creds:
         warnings.append(f"CRITICAL: Default admin credentials found -> {', '.join(weak_creds)}")
@@ -206,7 +222,7 @@ def check_router_security(gateway_ip, open_ports):
 
 def main():
     print_banner()
-    print(YELLOW + "[*] Detecting connected Wi-Fi Network..." + RESET)
+    print(YELLOW + "[*] Detecting connected Wi-Fi & Public Network Info..." + RESET)
     
     local_ip, gateway_ip, subnet_base = get_auto_network_info()
     if not local_ip:
@@ -216,10 +232,16 @@ def main():
     print(GREEN + f"[✔] Router Gateway IP  : {gateway_ip}" + RESET)
     print(GREEN + f"[✔] Target Subnet      : {subnet_base}0/24" + RESET)
     
+    # Public IP & ISP Fetch
+    pub_info = get_public_ip_info()
+    if pub_info:
+        print(CYAN + f"[✔] Public IP Address  : {pub_info['ip']}" + RESET)
+        print(CYAN + f"[✔] ISP / Operator     : {pub_info['isp']} ({pub_info['org']})" + RESET)
+        print(CYAN + f"[✔] Location           : {pub_info['city']}, {pub_info['country']}" + RESET)
+    
     latency = test_wifi_latency(gateway_ip)
     print(GREEN + f"[✔] Router Ping Speed  : {latency}" + RESET)
     
-    # Speedtest Call
     dl_speed = test_download_speed()
     print(GREEN + f"[✔] Download Speed     : {dl_speed}" + RESET)
     print(CYAN + "-" * 65 + RESET)
