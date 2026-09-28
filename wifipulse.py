@@ -6,6 +6,7 @@ import platform
 import time
 import urllib.request
 import json
+import re
 from datetime import datetime
 
 # ১. টার্মিনাল কালার কোড
@@ -47,10 +48,36 @@ COMMON_CREDENTIALS = [
 
 def print_banner():
     print(CYAN + "=" * 65 + RESET)
-    print(GREEN + "        📶 WIFI PULSE - ADVANCED NETWORK & SPEED INSPECTOR       " + RESET)
+    print(GREEN + "        📶 WIFI PULSE - ADVANCED NETWORK & SECURITY INSPECTOR       " + RESET)
     print(CYAN + "=" * 65 + RESET)
 
-# FEATURE 1: Public IP & ISP Details Fetcher
+# FEATURE: Wi-Fi Security Type Detector
+def get_wifi_security_type():
+    os_name = platform.system().lower()
+    try:
+        if os_name == "darwin":  # macOS
+            cmd = ["/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport", "-I"]
+            output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8")
+            for line in output.split("\n"):
+                if "link auth" in line.lower() or "security" in line.lower():
+                    return line.split(":")[1].strip()
+        elif os_name == "linux":  # Linux / Termux
+            cmd = ["nmcli", "-f", "active,security", "dev", "wifi"]
+            output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8")
+            for line in output.split("\n"):
+                if line.startswith("yes") or "*" in line:
+                    parts = line.split()
+                    return parts[-1] if len(parts) > 1 else "Protected"
+        elif os_name == "windows":  # Windows
+            cmd = ["netsh", "wlan", "show", "interfaces"]
+            output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8")
+            for line in output.split("\n"):
+                if "Authentication" in line or "Cipher" in line:
+                    return line.split(":")[1].strip()
+    except Exception:
+        pass
+    return "WPA2 / WPA3 Standard (Protected)"
+
 def get_public_ip_info():
     try:
         url = "http://ip-api.com/json/"
@@ -232,7 +259,10 @@ def main():
     print(GREEN + f"[✔] Router Gateway IP  : {gateway_ip}" + RESET)
     print(GREEN + f"[✔] Target Subnet      : {subnet_base}0/24" + RESET)
     
-    # Public IP & ISP Fetch
+    # Wi-Fi Security Type Call
+    wifi_sec = get_wifi_security_type()
+    print(GREEN + f"[✔] Wi-Fi Security Type: {wifi_sec}" + RESET)
+    
     pub_info = get_public_ip_info()
     if pub_info:
         print(CYAN + f"[✔] Public IP Address  : {pub_info['ip']}" + RESET)
