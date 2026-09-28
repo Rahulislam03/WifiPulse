@@ -4,16 +4,16 @@ import threading
 import subprocess
 import platform
 import time
+import urllib.request
 from datetime import datetime
 
-# ১. টার্মিনাল কালার কোড (ANSI Colors)
+# ১. টার্মিনাল কালার কোড
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
 CYAN = "\033[96m"
 RESET = "\033[0m"
 
-# পোর্ট ও সার্ভিস লিস্ট
 COMMON_PORTS = {
     21: "FTP",
     22: "SSH",
@@ -25,7 +25,6 @@ COMMON_PORTS = {
     8080: "HTTP-Proxy"
 }
 
-# ২. MAC Vendor OUI ডিকশনারি (Local Database)
 MAC_VENDORS = {
     "50:C7:BF": "TP-Link",
     "A4:C3:F0": "Apple",
@@ -34,13 +33,21 @@ MAC_VENDORS = {
     "B8:27:EB": "Raspberry Pi",
     "00:1A:2B": "Cisco",
     "E8:65:D4": "Xiaomi",
-    "FC:EC:DA": "Ubiquiti / Unifi",
-    "00:00:5E": "IANA Reserved"
+    "FC:EC:DA": "Ubiquiti / Unifi"
 }
+
+# ডিফল্ট পাসওয়ার্ড চেকিংয়ের কমন লিস্ট
+COMMON_CREDENTIALS = [
+    ("admin", "admin"),
+    ("admin", "1234"),
+    ("admin", "password"),
+    ("user", "user"),
+    ("root", "root")
+]
 
 def print_banner():
     print(CYAN + "=" * 65 + RESET)
-    print(GREEN + "        📶 WIFI PULSE - ADVANCED NETWORK & SECURITY INSPECTOR       " + RESET)
+    print(GREEN + "        📶 WIFI PULSE - ADVANCED NETWORK & SPEED INSPECTOR       " + RESET)
     print(CYAN + "=" * 65 + RESET)
 
 def get_auto_network_info():
@@ -72,8 +79,24 @@ def ping_host(ip):
     except Exception:
         return False
 
-def test_wifi_speed(gateway_ip):
-    print(YELLOW + f"[*] Testing Wi-Fi Latency (Ping to Gateway: {gateway_ip})..." + RESET)
+# FEATURE 5: Real Download Speedtest Function
+def test_download_speed():
+    print(YELLOW + "[*] Testing Internet Download Speed (Downloading 5MB test payload)..." + RESET)
+    test_url = "http://speedtest.tele2.net/1MB.zip"
+    try:
+        start_time = time.time()
+        with urllib.request.urlopen(test_url, timeout=10) as response:
+            data = response.read()
+            data_len = len(data)
+        elapsed_time = time.time() - start_time
+        
+        speed_bps = (data_len * 8) / elapsed_time
+        speed_mbps = speed_bps / (1024 * 1024)
+        return f"{speed_mbps:.2f} Mbps"
+    except Exception:
+        return "Speedtest Failed / Offline"
+
+def test_wifi_latency(gateway_ip):
     start_time = time.time()
     if ping_host(gateway_ip):
         latency = (time.time() - start_time) * 1000
@@ -94,7 +117,6 @@ def get_mac_address(ip):
         pass
     return "Unknown MAC"
 
-# Vendor Lookup
 def get_vendor(mac):
     if mac and mac != "Unknown MAC":
         oui = mac.replace("-", ":")[:8]
@@ -108,11 +130,10 @@ def get_hostname(ip):
     except Exception:
         return "Unknown Device"
 
-# Banner Grabbing
 def grab_banner(target_ip, port):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1.0)
+        sock.settimeout(0.8)
         sock.connect((target_ip, port))
         
         if port in [80, 8080]:
@@ -146,7 +167,23 @@ def scan_device_ports_and_banners(target_ip):
             pass
     return open_ports
 
-# Local Vulnerability Check
+# FEATURE 4: Router Weak Credentials Scanner
+def check_router_weak_credentials(gateway_ip):
+    weak_found = []
+    for user, pwd in COMMON_CREDENTIALS:
+        try:
+            password_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+            password_mgr.add_password(None, f"http://{gateway_ip}", user, pwd)
+            handler = urllib.request.HTTPBasicAuthHandler(password_mgr)
+            opener = urllib.request.build_opener(handler)
+            
+            with opener.open(f"http://{gateway_ip}", timeout=1.5) as response:
+                if response.status == 200:
+                    weak_found.append(f"{user}:{pwd}")
+        except Exception:
+            pass
+    return weak_found
+
 def check_router_security(gateway_ip, open_ports):
     warnings = []
     open_port_numbers = [p["port"] for p in open_ports]
@@ -159,6 +196,11 @@ def check_router_security(gateway_ip, open_ports):
         warnings.append("Router Web Admin panel uses unencrypted HTTP (Port 80) only.")
     if 1900 in open_port_numbers:
         warnings.append("UPnP (Port 1900) is active. Potential vulnerability entry point.")
+        
+    # Weak Password Audit
+    weak_creds = check_router_weak_credentials(gateway_ip)
+    if weak_creds:
+        warnings.append(f"CRITICAL: Default admin credentials found -> {', '.join(weak_creds)}")
         
     return warnings
 
@@ -174,11 +216,15 @@ def main():
     print(GREEN + f"[✔] Router Gateway IP  : {gateway_ip}" + RESET)
     print(GREEN + f"[✔] Target Subnet      : {subnet_base}0/24" + RESET)
     
-    wifi_speed = test_wifi_speed(gateway_ip)
-    print(GREEN + f"[✔] Wi-Fi Latency Speed: {wifi_speed}" + RESET)
+    latency = test_wifi_latency(gateway_ip)
+    print(GREEN + f"[✔] Router Ping Speed  : {latency}" + RESET)
+    
+    # Speedtest Call
+    dl_speed = test_download_speed()
+    print(GREEN + f"[✔] Download Speed     : {dl_speed}" + RESET)
     print(CYAN + "-" * 65 + RESET)
 
-    print(YELLOW + "[*] Discovering Devices, Vendors, Banners & Security Checks (1-254)..." + RESET)
+    print(YELLOW + "[*] Discovering Devices, Vendors, Banners & Security Audits (1-254)..." + RESET)
     print("    Please wait a few moments...\n")
     
     active_devices = []
