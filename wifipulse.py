@@ -5,24 +5,21 @@ import subprocess
 import platform
 from datetime import datetime
 
-# সাধারণ নেটওয়ার্ক সার্ভিস পোর্টের তালিকা
 COMMON_PORTS = {
     21: "FTP",
     22: "SSH",
     23: "TELNET",
     53: "DNS",
-    80: "HTTP (Router Admin)",
-    443: "HTTPS (Secure Admin)",
-    1900: "UPnP",
+    80: "HTTP",
+    443: "HTTPS",
     8080: "HTTP-Proxy"
 }
 
 def print_banner():
-    print("=" * 60)
+    print("=" * 65)
     print("        📶 WIFI PULSE - AUTOMATIC NETWORK INSPECTOR       ")
-    print("=" * 60)
+    print("=" * 65)
 
-# ১. বর্তমান কানেক্টেড ওয়াইফাইয়ের IP, Subnet এবং Gateway অটো-ডিটেক্ট করা
 def get_auto_network_info():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -42,7 +39,6 @@ def get_auto_network_info():
     
     return local_ip, gateway_ip, subnet_base
 
-# ২. অপারেটিং সিস্টেম অনুযায়ী Ping চেক করা
 def ping_host(ip):
     param = '-n' if platform.system().lower() == 'windows' else '-c'
     command = ['ping', param, '1', '-w', '500', ip] if platform.system().lower() == 'windows' else ['ping', param, '1', '-W', '1', ip]
@@ -53,21 +49,29 @@ def ping_host(ip):
     except Exception:
         return False
 
-# ৩. পোর্ট স্ক্যানিং
-open_ports = []
-def scan_port(target_ip, port):
+# IP থেকে ডিভাইসের নাম (Hostname) খোঁজার ফাংশন
+def get_hostname(ip):
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.8)
-        result = sock.connect_ex((target_ip, port))
-        if result == 0:
-            service = COMMON_PORTS.get(port, "Unknown")
-            open_ports.append((port, service))
-        sock.close()
+        host_info = socket.gethostbyaddr(ip)
+        return host_info[0]
     except Exception:
-        pass
+        return "Unknown Device"
 
-# ৪. মূল কাজ
+# নির্দিষ্ট IP-এর ওপেন পোর্ট স্ক্যান করার ফাংশন
+def scan_device_ports(target_ip):
+    open_ports = []
+    for port, service in COMMON_PORTS.items():
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            result = sock.connect_ex((target_ip, port))
+            if result == 0:
+                open_ports.append(f"{port}/{service}")
+            sock.close()
+        except Exception:
+            pass
+    return open_ports
+
 def main():
     print_banner()
     print("[*] Detecting connected Wi-Fi Network...")
@@ -79,48 +83,47 @@ def main():
     print(f"[✔] Connected Local IP : {local_ip}")
     print(f"[✔] Router Gateway IP  : {gateway_ip}")
     print(f"[✔] Target Subnet      : {subnet_base}0/24")
-    print("-" * 60)
+    print("-" * 65)
 
-    # রাউটারের খোলা পোর্ট চেক করা
-    print(f"[*] Scanning Router/Gateway ({gateway_ip}) Open Ports...")
+    print("[*] Discovering Active Devices & Open Ports (Range .1 to .254)...")
+    print("    Please wait a few moments...\n")
+    
+    active_devices = []
+    lock = threading.Lock()
+
+    def process_host(ip_last):
+        target = f"{subnet_base}{ip_last}"
+        if ping_host(target):
+            hostname = get_hostname(target)
+            open_ports = scan_device_ports(target)
+            
+            with lock:
+                active_devices.append({
+                    "ip": target,
+                    "name": hostname,
+                    "ports": open_ports
+                })
+
     threads = []
-    for port in COMMON_PORTS.keys():
-        t = threading.Thread(target=scan_port, args=(gateway_ip, port))
+    for i in range(1, 255):
+        t = threading.Thread(target=process_host, args=(i,))
         threads.append(t)
         t.start()
-        
+
     for t in threads:
         t.join()
 
-    if open_ports:
-        for port, service in open_ports:
-            print(f"    [+] Port {port:<5} : OPEN ({service})")
-    else:
-        print("    [-] No standard open ports found on router.")
-
-    print("-" * 60)
-    # পুরো ওয়াইফাই নেটওয়ার্কের ১ থেকে ২৫৪ সকল IP স্ক্যান
-    print("[*] Discovering ALL Active Devices on connected Wi-Fi (Range .1 to .254)...")
-    active_hosts = []
+    print(f"[✔] Found {len(active_devices)} active device(s) on this Wi-Fi:\n")
     
-    def check_host(ip_last):
-        target = f"{subnet_base}{ip_last}"
-        if ping_host(target):
-            active_hosts.append(target)
-
-    ping_threads = []
-    for i in range(1, 255):  # ১ থেকে ২৫৪ পর্যন্ত সম্পূর্ণ সাবনেট স্ক্যান
-        t = threading.Thread(target=check_host, args=(i,))
-        ping_threads.append(t)
-        t.start()
-
-    for t in ping_threads:
-        t.join()
-
-    print(f"\n[✔] Found {len(active_hosts)} active devices on this Wi-Fi:")
-    for host in sorted(active_hosts, key=lambda x: int(x.split('.')[-1])):
-        device_label = " (Router)" if host == gateway_ip else (" (Your Device)" if host == local_ip else "")
-        print(f"    [•] {host}{device_label}")
+    # ফলাফল প্রিন্ট করা
+    for dev in sorted(active_devices, key=lambda x: int(x['ip'].split('.')[-1])):
+        label = " (Router)" if dev['ip'] == gateway_ip else (" (Your Device)" if dev['ip'] == local_ip else "")
+        ports_str = ", ".join(dev['ports']) if dev['ports'] else "None found"
+        
+        print(f" 📌 IP Address : {dev['ip']}{label}")
+        print(f"    Device Name: {dev['name']}")
+        print(f"    Open Ports : {ports_str}")
+        print("    " + "-" * 40)
 
     print("\n[*] Scan Completed at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
